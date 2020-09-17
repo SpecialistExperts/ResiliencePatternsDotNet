@@ -1,5 +1,5 @@
 {
-	"Count": 10,
+	"Count": 1,
 	"Parameters": {
 		"UrlConfiguration": {
 		  "BaseUrl": "http://httpbin.org",
@@ -10,6 +10,10 @@
 		  "Error": {
 			"Url": "/status/500",
 			"Method": "GET"
+		  },
+		  "Proxy": {
+			"BaseUrl": "http://localhost:44399",
+			"Enabled": true
 		  }
 		},
 		"RequestConfiguration": {

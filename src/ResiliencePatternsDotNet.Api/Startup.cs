@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -13,6 +14,7 @@ using ResiliencePatternsDotNet.Domain.Commands;
 using ResiliencePatternsDotNet.Domain.Common;
 using ResiliencePatternsDotNet.Domain.Services;
 using ResiliencePatternsDotNet.Infra;
+using Toxiproxy.Net;
 
 namespace ResiliencePatternsDotNet.Api
 {
@@ -27,6 +29,12 @@ namespace ResiliencePatternsDotNet.Api
 
         public void ConfigureServices(IServiceCollection services)
         {
+            // var _proxyProcess = new Process()
+            // {
+            //     StartInfo = new ProcessStartInfo(@".\toxiproxy-server-windows-amd64.exe"),
+            // };
+            // _proxyProcess.Start();
+            
             services.Configure<KestrelServerOptions>(options => { options.AllowSynchronousIO = true; });
             services.AddMetrics();
             

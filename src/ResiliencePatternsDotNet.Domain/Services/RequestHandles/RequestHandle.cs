@@ -5,6 +5,8 @@ using ResiliencePatternsDotNet.Domain.Configurations;
 using ResiliencePatternsDotNet.Domain.Entities.Enums;
 using ResiliencePatternsDotNet.Domain.Exceptions;
 using ResiliencePatternsDotNet.Domain.Services.Resiliences;
+using Toxiproxy.Net;
+using Toxiproxy.Net.Toxics;
 
 namespace ResiliencePatternsDotNet.Domain.Services.RequestHandles
 {
@@ -42,8 +44,11 @@ namespace ResiliencePatternsDotNet.Domain.Services.RequestHandles
             }
         }
 
-        public HttpResponseMessage HandleRequest(int probabilityErrorPercent, UrlFetchConfigurationSection success, UrlFetchConfigurationSection error) 
-            => _configurationSection.RunPolicy switch
+        public HttpResponseMessage HandleRequest(int probabilityErrorPercent, UrlFetchConfigurationSection success, UrlFetchConfigurationSection error)
+        {
+            return ConfigureProxy(probabilityErrorPercent, success, error, () =>
+            {
+                return _configurationSection.RunPolicy switch
                 {
                     RunPolicyEnum.RETRY => HandleClientResult(_resiliencePatterns.RetryPolicy
                         .ExecuteAndCapture(() => MakeRequest(probabilityErrorPercent, success, error))
@@ -58,6 +63,40 @@ namespace ResiliencePatternsDotNet.Domain.Services.RequestHandles
                     RunPolicyEnum.NONE => HandleClientResult(MakeRequest(probabilityErrorPercent, success, error)),
                     _ => throw new ArgumentOutOfRangeException()
                 };
+            });
+            
+        }
+
+        private HttpResponseMessage ConfigureProxy(in int probabilityErrorPercent, UrlFetchConfigurationSection success,
+            UrlFetchConfigurationSection error, Func<HttpResponseMessage> runPolicy)
+        {
+            using (var connection = new Connection(true))
+            {
+                var client = connection.Client();
+
+                //proxy all traffic from 127.0.0.1:44399 to 127.0.0.1:5000
+                var localToGoogleProxy = new Proxy() { 
+                    Name = "localToGoogle", 
+                    Enabled = true, 
+                    Listen = "127.0.0.1:44399", 
+                    Upstream = _configurationSection.UrlConfiguration.BaseUrl 
+                };
+                            
+                client.Add(localToGoogleProxy);
+
+                        
+                var proxy = client.FindProxy("localToGoogle");
+
+                var timeoutProxy = new TimeoutToxic();
+                timeoutProxy.Attributes.Timeout = 100;
+                timeoutProxy.Toxicity = 1.0;
+
+                proxy.Add(timeoutProxy);
+                proxy.Update();
+
+                return runPolicy();
+            }
+        }
 
         private HttpResponseMessage MakeRequest(int probabilityErrorPercent, UrlFetchConfigurationSection success, UrlFetchConfigurationSection error)
         {
@@ -78,21 +117,34 @@ namespace ResiliencePatternsDotNet.Domain.Services.RequestHandles
                 actionUrl = success.Url;
                 Console.WriteLine($"Request Normal!");
             }
-            
-            using (var httpClient = new HttpClient())
+
+            try
             {
-                httpClient.BaseAddress = new Uri(_configurationSection.UrlConfiguration.BaseUrl);
-                httpClient.Timeout =
-                    TimeSpan.FromMilliseconds(_configurationSection.RequestConfiguration.Timeout);
-                var methodEnum = new HttpMethod(actionMethod);
+                using (var httpClient = new HttpClient())
+                {
+                    
+                        
+                        
+                        httpClient.BaseAddress = new Uri("http://localhost:44399");
+                        httpClient.Timeout =
+                            TimeSpan.FromMilliseconds(_configurationSection.RequestConfiguration.Timeout);
+                        var methodEnum = new HttpMethod(actionMethod);
 
-                var result = httpClient.SendAsync(new HttpRequestMessage(methodEnum, actionUrl)).GetAwaiter().GetResult();
-                Console.WriteLine($"Result: {result.StatusCode}");
+                        var result = httpClient.SendAsync(new HttpRequestMessage(methodEnum, actionUrl)).GetAwaiter().GetResult();
+                        Console.WriteLine($"Result: {result.StatusCode}");
 
-                if (_configurationSection.RunPolicy != RunPolicyEnum.NONE && !result.IsSuccessStatusCode)
-                    throw new RequestException(result);
+                        if (_configurationSection.RunPolicy != RunPolicyEnum.NONE && !result.IsSuccessStatusCode)
+                            throw new RequestException(result);
 
-                return result;
+                        return result;
+                    }
+                    
+
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
             }
         }
 
